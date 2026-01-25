@@ -1,0 +1,18 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Issuer Simulator - Fluxo Técnico">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="a" value="acquirer-core" style="rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="120" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="i" value="issuer-simulator" style="rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="120" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d" value="Decisão do Emissor&#10;✔ authorized&#10;✖ declined" style="rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="110" width="260" height="80" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

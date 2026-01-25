@@ -1,0 +1,18 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Issuer Simulator - Visão Produto">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="s1" value="Cliente confirma pagamento" style="rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="120" width="220" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2" value="Banco avalia transação" style="rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="120" width="260" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3" value="Pagamento aprovado ou recusado" style="rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="600" y="120" width="280" height="60" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
