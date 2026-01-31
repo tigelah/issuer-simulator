@@ -16,6 +16,15 @@ Este serviço simula:
 - recusas por regras simples
 - resposta assíncrona via eventos
 
+Antes de publicar `payment.authorized`, o emissor consulta o ledger:
+- GET /limits/pan/{panHash}
+- GET /limits/users/{userId}
+- GET /accounts/{accountId}/available-credit
+
+Regras:
+- autorização não consome limite de janela
+- captura consome (via ledger consumer de payment.captured)
+
 ---
 
 ## 🧱 Arquitetura (Clean)
@@ -89,6 +98,10 @@ mvn clean verify
 ```
 acquirer-core
    ↓ (risk.approved)
+issuer-simulator
+   ↓ 
+ledger-service
+   ↓ (check-limits)
 issuer-simulator
    ↓ (authorized | declined)
 acquirer-core

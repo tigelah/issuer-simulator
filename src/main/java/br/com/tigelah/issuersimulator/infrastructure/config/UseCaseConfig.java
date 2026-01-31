@@ -1,6 +1,7 @@
 package br.com.tigelah.issuersimulator.infrastructure.config;
 
 import br.com.tigelah.issuersimulator.application.usecase.AuthorizeByIssuerUseCase;
+import br.com.tigelah.issuersimulator.application.usecase.AuthorizeWithLimitsUseCase;
 import br.com.tigelah.issuersimulator.domain.services.SimpleIssuerRules;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -16,5 +17,10 @@ public class UseCaseConfig {
     @Bean
     public AuthorizeByIssuerUseCase authorizeByIssuerUseCase(SimpleIssuerRules rules) {
         return new AuthorizeByIssuerUseCase(rules);
+    }
+
+    @Bean
+    AuthorizeWithLimitsUseCase authorizeWithLimitsUseCase() {
+        return new AuthorizeWithLimitsUseCase();
     }
 }

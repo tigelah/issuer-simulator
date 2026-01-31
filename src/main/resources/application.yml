@@ -22,3 +22,5 @@ management:
 
 issuer:
   max-amount-cents: ${ISSUER_MAX_AMOUNT_CENTS:1000000}
+  ledger:
+    base-url: ${LEDGER_BASE_URL:http://localhost:8092}
