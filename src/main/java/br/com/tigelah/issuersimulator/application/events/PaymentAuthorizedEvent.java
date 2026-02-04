@@ -9,5 +9,9 @@ public record PaymentAuthorizedEvent(
         String correlationId,
         String type,
         UUID paymentId,
-        String authCode
+        String authCode,
+        Integer installments,
+        long interestCents,
+        long totalCents,
+        long installmentAmountCents
 ) { }

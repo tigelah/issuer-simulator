@@ -6,6 +6,7 @@ import br.com.tigelah.issuersimulator.application.ports.EventPublisher;
 import br.com.tigelah.issuersimulator.application.security.PanHasher;
 import br.com.tigelah.issuersimulator.application.usecase.AuthorizeByIssuerUseCase;
 import br.com.tigelah.issuersimulator.application.usecase.AuthorizeWithLimitsUseCase;
+import br.com.tigelah.issuersimulator.application.usecase.CalculateInstallmentsUseCase;
 import br.com.tigelah.issuersimulator.infrastructure.http.LedgerClient;
 import br.com.tigelah.issuersimulator.infrastructure.messaging.Topics;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,24 +26,27 @@ public class IssuerEventsConsumer {
     private static final Logger log = LoggerFactory.getLogger(IssuerEventsConsumer.class);
 
     private final ObjectMapper mapper;
-    private final AuthorizeByIssuerUseCase issuerUseCase;
+    private final AuthorizeByIssuerUseCase useCase;
     private final LedgerClient ledger;
     private final AuthorizeWithLimitsUseCase limitsUseCase;
+    private final CalculateInstallmentsUseCase installmentsUseCase; // NOVO
     private final EventPublisher publisher;
     private final Clock clock;
 
     public IssuerEventsConsumer(
             ObjectMapper mapper,
-            AuthorizeByIssuerUseCase issuerUseCase,
+            AuthorizeByIssuerUseCase useCase,
             LedgerClient ledger,
             AuthorizeWithLimitsUseCase limitsUseCase,
+            CalculateInstallmentsUseCase installmentsUseCase, // NOVO
             EventPublisher publisher,
             Clock clock
     ) {
         this.mapper = mapper;
-        this.issuerUseCase = issuerUseCase;
+        this.useCase = useCase;
         this.ledger = ledger;
         this.limitsUseCase = limitsUseCase;
+        this.installmentsUseCase = installmentsUseCase;
         this.publisher = publisher;
         this.clock = clock;
     }
@@ -56,62 +60,76 @@ public class IssuerEventsConsumer {
             JsonNode root = mapper.readTree(message);
 
             String correlationId = root.path("correlationId").asText(null);
-            if (correlationId != null && !correlationId.isBlank()) MDC.put("correlationId", correlationId);
+            if (correlationId != null) MDC.put("correlationId", correlationId);
 
             String type = root.path("type").asText("");
-            UUID paymentId = parseUuid(root, "paymentId");
-            if (paymentId == null) {
-                log.warn("issuer_event_missing_paymentId type={} payload={}", type, root);
-                return;
-            }
-
+            UUID paymentId = UUID.fromString(root.path("paymentId").asText());
 
             if ("payment.risk.rejected".equals(type)) {
                 publishDeclined(paymentId, correlationId, "risk_rejected");
-                log.info("issuer_declined_by_risk paymentId={}", paymentId);
                 return;
             }
-
 
             if ("payment.risk.approved".equals(type)) {
 
                 long amountCents = root.path("amountCents").asLong(0);
-                if (amountCents <= 0) {
-                    publishDeclined(paymentId, correlationId, "invalid_amount");
-                    log.info("issuer_declined_invalid_amount paymentId={}", paymentId);
-                    return;
+                boolean riskApproved = root.path("approved").asBoolean(true);
+
+
+                var accountId = UUID.fromString(root.path("accountId").asText());
+                var merchantId = root.path("merchantId").asText("");
+                var userId = root.path("userId").asText("");
+                var panHash = root.path("panHash").asText("");
+
+                if ((panHash == null || panHash.isBlank()) && root.has("pan")) {
+                    var pan = root.path("pan").asText("");
+                    if (!pan.isBlank()) panHash = PanHasher.sha256(pan);
                 }
 
+                int installments = root.path("installments").asInt(1);
 
-                UUID accountId = parseUuid(root, "accountId");
-                if (accountId == null) {
-                    publishDeclined(paymentId, correlationId, "account_required");
-                    log.info("issuer_declined_missing_account paymentId={}", paymentId);
+                var issuerDecision = useCase.execute(amountCents, riskApproved);
+                if (!issuerDecision.approved()) {
+                    publishDeclined(paymentId, correlationId, issuerDecision.reason());
                     return;
                 }
-
-                String userId = root.path("userId").asText("");
-                String panHash = resolvePanHash(root);
-
 
                 var limitDecision = limitsUseCase.execute(accountId, amountCents, userId, panHash, ledger);
                 if (!limitDecision.authorized()) {
                     publishDeclined(paymentId, correlationId, limitDecision.reason());
-                    log.info("issuer_declined_by_limits paymentId={} reason={}", paymentId, limitDecision.reason());
                     return;
                 }
 
+                try {
+                    var breakdown = installmentsUseCase.execute(merchantId, amountCents, installments);
 
-                var issuerDecision = issuerUseCase.execute(amountCents, true);
+                    var authorized = new PaymentAuthorizedEvent(
+                            UUID.randomUUID(),
+                            Instant.now(clock),
+                            correlationId,
+                            Topics.PAYMENT_AUTHORIZED,
+                            paymentId,
+                            limitDecision.authCode(),
+                            breakdown.installments(),
+                            breakdown.interestCents(),
+                            breakdown.totalCents(),
+                            breakdown.installmentAmountCents()
+                    );
 
-                if (issuerDecision.approved()) {
-                    publishAuthorized(paymentId, correlationId, issuerDecision.authCode());
-                    log.info("issuer_authorized paymentId={}", paymentId);
-                } else {
-                    publishDeclined(paymentId, correlationId, issuerDecision.reason());
-                    log.info("issuer_declined paymentId={} reason={}", paymentId, issuerDecision.reason());
+                    publisher.publishAuthorized(authorized);
+                    log.info("issuer_authorized paymentId={} installments={} totalCents={} interestCents={}",
+                            paymentId, breakdown.installments(), breakdown.totalCents(), breakdown.interestCents());
+                    return;
+
+                } catch (IllegalArgumentException ex) {
+                    var reason = ex.getMessage();
+                    if (!"invalid_installments".equals(reason) && !"installments_not_supported".equals(reason)) {
+                        reason = "invalid_installments";
+                    }
+                    publishDeclined(paymentId, correlationId, reason);
+                    log.info("issuer_declined_installments paymentId={} installments={} reason={}", paymentId, installments, reason);
+                    return;
                 }
-                return;
             }
 
             log.warn("issuer_unknown_event type={} payload={}", type, root);
@@ -123,40 +141,6 @@ public class IssuerEventsConsumer {
         }
     }
 
-    private UUID parseUuid(JsonNode root, String field) {
-        var raw = root.path(field).asText("");
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            return UUID.fromString(raw);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private String resolvePanHash(JsonNode root) {
-        var panHash = root.path("panHash").asText("");
-        if (panHash != null && !panHash.isBlank()) return panHash;
-
-
-        if (root.has("pan")) {
-            var pan = root.path("pan").asText("");
-            if (pan != null && !pan.isBlank()) return PanHasher.sha256(pan);
-        }
-        return "";
-    }
-
-    private void publishAuthorized(UUID paymentId, String correlationId, String authCode) {
-        var authorized = new PaymentAuthorizedEvent(
-                UUID.randomUUID(),
-                Instant.now(clock),
-                correlationId,
-                Topics.PAYMENT_AUTHORIZED,
-                paymentId,
-                authCode != null && !authCode.isBlank() ? authCode : ("SIM" + System.nanoTime())
-        );
-        publisher.publishAuthorized(authorized);
-    }
-
     private void publishDeclined(UUID paymentId, String correlationId, String reason) {
         var declined = new PaymentDeclinedEvent(
                 UUID.randomUUID(),
@@ -164,7 +148,7 @@ public class IssuerEventsConsumer {
                 correlationId,
                 Topics.PAYMENT_DECLINED,
                 paymentId,
-                reason != null && !reason.isBlank() ? reason : "declined"
+                reason
         );
         publisher.publishDeclined(declined);
     }

@@ -8,18 +8,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class AuthorizeWithLimitsUseCaseTest {
 
-    @Test
-    void declines_when_insufficient_funds() {
-        var uc = new AuthorizeWithLimitsUseCase();
-        LedgerClient ledger = new FakeLedger(50, Optional.empty(), Optional.empty());
-
-        var d = uc.execute(UUID.randomUUID(), 60, "u1", "h1", ledger);
-        assertFalse(d.authorized());
-        assertEquals("insufficient_funds", d.reason());
-    }
 
     @Test
     void declines_when_daily_limit_exceeded() {
@@ -59,5 +51,37 @@ class AuthorizeWithLimitsUseCaseTest {
 
         @Override public Optional<LimitRule> getUserLimit(String userId) { return userRule; }
         @Override public Optional<LimitRule> getPanLimit(String panHash) { return panRule; }
+    }
+
+    @Test
+    void approves_and_generates_auth_code_when_ok() {
+        var ledger = mock(LedgerClient.class);
+        var available = mock(LedgerClient.AvailableCredit.class);
+        when(available.availableCents()).thenReturn(10_000L);
+        when(ledger.getUserLimit(anyString())).thenReturn(Optional.empty());
+        when(ledger.getPanLimit(anyString())).thenReturn(Optional.empty());
+
+        var uc = new AuthorizeWithLimitsUseCase();
+        var out = uc.execute(UUID.randomUUID(), 1000, "u1", "h1", ledger);
+
+        assertTrue(out.authorized());
+        assertEquals("ok", out.reason());
+        assertNotNull(out.authCode());
+        assertTrue(out.authCode().startsWith("SIM"));
+    }
+
+    @Test
+    void declines_when_insufficient_funds() {
+        var ledger = mock(LedgerClient.class);
+        var available = mock(LedgerClient.AvailableCredit.class);
+        when(available.availableCents()).thenReturn(500L);
+        when(ledger.getAvailableCredit(any(), anyString())).thenReturn(available);
+
+        var uc = new AuthorizeWithLimitsUseCase();
+        var out = uc.execute(UUID.randomUUID(), 1000, "u1", "h1", ledger);
+
+        assertFalse(out.authorized());
+        assertEquals("insufficient_funds", out.reason());
+        assertNull(out.authCode());
     }
 }
